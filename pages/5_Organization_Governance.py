@@ -5,9 +5,10 @@ from supabase import create_client
 from dimension_page import render_dimension_page
 
 
-# --------------------------------------------------
-# Supabase connection
-# --------------------------------------------------
+# ==================================================
+# SUPABASE CONNECTION
+# ==================================================
+
 @st.cache_resource
 def init_supabase():
     return create_client(
@@ -19,9 +20,10 @@ def init_supabase():
 supabase = init_supabase()
 
 
-# --------------------------------------------------
-# Load data
-# --------------------------------------------------
+# ==================================================
+# LOAD ASSESSMENT DATA
+# ==================================================
+
 @st.cache_data(ttl=5)
 def load_data():
 
@@ -35,12 +37,38 @@ def load_data():
     return pd.DataFrame(response.data)
 
 
-# --------------------------------------------------
-# Load and prepare data
-# --------------------------------------------------
+# ==================================================
+# LOAD INDUSTRY BENCHMARK DATA
+# ==================================================
+
+@st.cache_data(ttl=300)
+def load_benchmark_data():
+
+    response = (
+        supabase
+        .table("benchmark_reference")
+        .select("*")
+        .execute()
+    )
+
+    return pd.DataFrame(response.data)
+
+
+# ==================================================
+# LOAD AND PREPARE DATA
+# ==================================================
+
 try:
 
+    # ----------------------------------------------
+    # Assessment data
+    # ----------------------------------------------
+
     df = load_data()
+
+    if df.empty:
+        st.info("No assessment responses are available yet.")
+        st.stop()
 
     df["score"] = pd.to_numeric(
         df["score"],
@@ -58,11 +86,40 @@ try:
     )
 
 
-    # --------------------------------------------------
-    # Render page
-    # --------------------------------------------------
+    # ----------------------------------------------
+    # Benchmark data
+    # ----------------------------------------------
+
+    benchmark_df = load_benchmark_data()
+
+    benchmark_columns = [
+        "average_current",
+        "average_future",
+        "lower_quartile_current",
+        "lower_quartile_future",
+        "median_current",
+        "median_future",
+        "top_quartile_current",
+        "top_quartile_future"
+    ]
+
+    for column in benchmark_columns:
+
+        if column in benchmark_df.columns:
+
+            benchmark_df[column] = pd.to_numeric(
+                benchmark_df[column],
+                errors="coerce"
+            )
+
+
+    # ----------------------------------------------
+    # Render Organization & Governance page
+    # ----------------------------------------------
+
     render_dimension_page(
         df=df,
+        benchmark_df=benchmark_df,
         dimension="Organization & Governance",
         title="Organization & Governance"
     )

@@ -231,3 +231,83 @@ def maturity_gap_by_organization(data):
     return organization_scores[
         ["company_name", "maturity_gap"]
     ].copy()
+
+# Benchmark score by dimension
+def benchmark_score_by_dimension(benchmark_data, question_map, metric):
+    """
+    Calculate PwC reference benchmark scores by dimension.
+
+    Parameters
+    ----------
+    benchmark_data : DataFrame
+        Data from benchmark_reference.
+
+    question_map : DataFrame
+        Question metadata containing question_id and dimension.
+
+    metric : str
+        One of:
+        "Average"
+        "Lower Quartile"
+        "Median"
+        "Top Quartile"
+    """
+
+    metric_columns = {
+        "Average": (
+            "average_current",
+            "average_future"
+        ),
+        "Lower Quartile": (
+            "lower_quartile_current",
+            "lower_quartile_future"
+        ),
+        "Median": (
+            "median_current",
+            "median_future"
+        ),
+        "Top Quartile": (
+            "top_quartile_current",
+            "top_quartile_future"
+        )
+    }
+
+    current_column, future_column = metric_columns[metric]
+
+    # Attach each benchmark question to its dimension
+    benchmark = benchmark_data.merge(
+        question_map[["question_id", "dimension"]],
+        on="question_id",
+        how="left"
+    )
+
+    # Replicate PwC logic:
+    # AVERAGE of the selected benchmark level within each dimension
+    dimension_benchmark = (
+        benchmark
+        .groupby("dimension", as_index=False)
+        .agg(
+            benchmark_current=(current_column, "mean"),
+            benchmark_future=(future_column, "mean")
+        )
+    )
+
+    dimension_order = [
+        "Business Decisions & Analytics",
+        "Data & Information",
+        "Technology & Infrastructure",
+        "Process & Integration",
+        "Organization & Governance"
+    ]
+
+    dimension_benchmark["dimension"] = pd.Categorical(
+        dimension_benchmark["dimension"],
+        categories=dimension_order,
+        ordered=True
+    )
+
+    return (
+        dimension_benchmark
+        .sort_values("dimension")
+        .reset_index(drop=True)
+    )

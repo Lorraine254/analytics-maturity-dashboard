@@ -1,23 +1,76 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 from calculations import weighted_maturity_score
 
 
-# --------------------------------------------------
-# State score by question
-# --------------------------------------------------
+# ==================================================
+# DASHBOARD COLOURS
+# ==================================================
+
+NAVY = "#173F6B"
+LIGHT_BLUE = "#69B3F3"
+GOLD = "#D9B300"
+GRID = "rgba(23, 63, 107, 0.15)"
+TEXT = "#17375E"
+
+STATE_COLORS = {
+    "Current": NAVY,
+    "Future": LIGHT_BLUE
+}
+
+
+# ==================================================
+# QUESTION DISPLAY LABELS
+# Short labels are used on the chart.
+# Full questions are shown in the hover tooltip.
+# ==================================================
+
+QUESTION_LABELS = {
+
+    # Business Decisions & Analytics
+    "Q8": "Analytics Types",
+    "Q9": "Impact",
+    "Q10": "Investment",
+    "Q11": "Real-Time<br>Decisions",
+    "Q12": "ROI",
+
+    # Data & Information
+    "Q13": "Data<br>Structures",
+    "Q14": "Data Timeliness",
+    "Q15": "Data Quality<br>Management",
+    "Q16": "Data Classification<br>& Protection",
+
+    # Technology & Infrastructure
+    "Q17": "Big Data<br>Infrastructure",
+    "Q18": "Reporting<br>Tools",
+    "Q19": "Analytics Platforms<br>& Tools",
+
+    # Process & Integration
+    "Q20": "Structured<br>Process",
+    "Q21": "Process<br>Integration",
+
+    # Organization & Governance
+    "Q22": "Investment<br>Decisions",
+    "Q23": "Organizational Structure",
+    "Q24": "Data<br>Governance",
+    "Q25": "Data Asset<br>Management",
+}
+
+
+# ==================================================
+# QUESTION SCORE
+# ==================================================
+
 def state_score_by_question(data):
-    """
-    Calculate Current and Future state scores
-    for each question within a dimension.
-    """
 
     valid_data = data.dropna(
         subset=[
             "score",
             "question",
+            "question_id",
             "question_order",
             "state"
         ]
@@ -26,6 +79,7 @@ def state_score_by_question(data):
     if valid_data.empty:
         return pd.DataFrame(
             columns=[
+                "question_id",
                 "question",
                 "question_order",
                 "Current",
@@ -33,12 +87,11 @@ def state_score_by_question(data):
             ]
         )
 
-    # Average responses across organizations
-    # for each question and state.
     question_scores = (
         valid_data
         .groupby(
             [
+                "question_id",
                 "question",
                 "question_order",
                 "state"
@@ -55,6 +108,7 @@ def state_score_by_question(data):
         question_scores
         .pivot(
             index=[
+                "question_id",
                 "question",
                 "question_order"
             ],
@@ -66,7 +120,6 @@ def state_score_by_question(data):
 
     question_scores.columns.name = None
 
-    # Preserve questionnaire order
     question_scores = (
         question_scores
         .sort_values("question_order")
@@ -76,14 +129,11 @@ def state_score_by_question(data):
     return question_scores
 
 
-# --------------------------------------------------
-# State score by organization
-# --------------------------------------------------
+# ==================================================
+# ORGANIZATION SCORE
+# ==================================================
+
 def state_score_by_organization(data):
-    """
-    Calculate weighted Current and Future state scores
-    for each organization within the selected dimension.
-    """
 
     valid_data = data.dropna(
         subset=[
@@ -104,8 +154,7 @@ def state_score_by_organization(data):
         )
 
     valid_data["weighted_score"] = (
-        valid_data["score"]
-        * valid_data["weight"]
+        valid_data["score"] * valid_data["weight"]
     )
 
     organization_scores = (
@@ -149,54 +198,45 @@ def state_score_by_organization(data):
     return organization_scores
 
 
-# --------------------------------------------------
-# Wrap question labels
-# --------------------------------------------------
-def wrap_question(text, width=28):
-    """
-    Wrap long question text across multiple lines
-    for the x-axis of the vertical bar chart.
-    """
+# ==================================================
+# BENCHMARK COLUMN MAPPING
+# ==================================================
 
-    if pd.isna(text):
-        return ""
+def get_benchmark_columns(metric):
 
-    words = str(text).split()
+    metric_map = {
 
-    lines = []
-    current_line = []
+        "Average": (
+            "average_current",
+            "average_future"
+        ),
 
-    for word in words:
+        "Lower Quartile": (
+            "lower_quartile_current",
+            "lower_quartile_future"
+        ),
 
-        test_line = " ".join(
-            current_line + [word]
+        "Median": (
+            "median_current",
+            "median_future"
+        ),
+
+        "Top Quartile": (
+            "top_quartile_current",
+            "top_quartile_future"
         )
+    }
 
-        if len(test_line) <= width:
-            current_line.append(word)
-
-        else:
-
-            if current_line:
-                lines.append(
-                    " ".join(current_line)
-                )
-
-            current_line = [word]
-
-    if current_line:
-        lines.append(
-            " ".join(current_line)
-        )
-
-    return "<br>".join(lines)
+    return metric_map[metric]
 
 
-# --------------------------------------------------
-# Render dimension page
-# --------------------------------------------------
+# ==================================================
+# MAIN DIMENSION PAGE
+# ==================================================
+
 def render_dimension_page(
     df,
+    benchmark_df,
     dimension,
     title=None
 ):
@@ -205,9 +245,10 @@ def render_dimension_page(
         title = dimension
 
 
-    # --------------------------------------------------
-    # Filter selected dimension
-    # --------------------------------------------------
+    # ==================================================
+    # FILTER DIMENSION
+    # ==================================================
+
     dimension_df = df[
         df["dimension"] == dimension
     ].copy()
@@ -221,15 +262,13 @@ def render_dimension_page(
         return
 
 
-    # --------------------------------------------------
-    # Page title
-    # --------------------------------------------------
     st.title(title)
 
 
-    # --------------------------------------------------
-    # Current and Future data
-    # --------------------------------------------------
+    # ==================================================
+    # KPI CALCULATIONS
+    # ==================================================
+
     current_df = dimension_df[
         dimension_df["state"] == "Current"
     ].copy()
@@ -238,10 +277,6 @@ def render_dimension_page(
         dimension_df["state"] == "Future"
     ].copy()
 
-
-    # --------------------------------------------------
-    # KPI calculations
-    # --------------------------------------------------
     current_score = weighted_maturity_score(
         current_df
     )
@@ -251,8 +286,7 @@ def render_dimension_page(
     )
 
     maturity_gap = (
-        future_score
-        - current_score
+        future_score - current_score
     )
 
     organizations_surveyed = (
@@ -262,66 +296,152 @@ def render_dimension_page(
     )
 
 
-    # --------------------------------------------------
-    # KPI cards
-    # --------------------------------------------------
+    # ==================================================
+    # KPI CARDS
+    # ==================================================
+
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric(
-            "Current State Score",
-            f"{current_score:.2f}"
-        )
+        with st.container(border=True):
+            st.metric(
+                "Current State Score",
+                f"{current_score:.2f}"
+            )
 
     with col2:
-        st.metric(
-            "Future State Score",
-            f"{future_score:.2f}"
-        )
+        with st.container(border=True):
+            st.metric(
+                "Future State Score",
+                f"{future_score:.2f}"
+            )
 
     with col3:
-        st.metric(
-            "Maturity Gap",
-            f"{maturity_gap:.2f}"
-        )
+        with st.container(border=True):
+            st.metric(
+                "Maturity Gap",
+                f"{maturity_gap:.2f}"
+            )
 
     with col4:
-        st.metric(
-            "Organizations Surveyed",
-            organizations_surveyed
+        with st.container(border=True):
+            st.metric(
+                "Organizations Surveyed",
+                organizations_surveyed
+            )
+
+    st.write("")
+
+
+    # ==================================================
+    # STATE + INDUSTRY BENCHMARK CONTROLS
+    # ==================================================
+
+    control_col1, control_col2, control_spacer = st.columns(
+    [1, 4.5, 1]
+)
+
+    with control_col1:
+
+        state_view = st.segmented_control(
+            "State",
+            options=[
+                "Current",
+                "Future"
+            ],
+            default="Current",
+            key=f"state_{dimension}"
+        )
+
+    with control_col2:
+
+        benchmark_metric = st.segmented_control(
+            "Industry Benchmark",
+            options=[
+                "Average",
+                "Lower Quartile",
+                "Median",
+                "Top Quartile"
+            ],
+            default="Average",
+            key=f"benchmark_{dimension}"
         )
 
 
-    # --------------------------------------------------
-    # State selector
-    # --------------------------------------------------
-    st.write("")
+    # ==================================================
+    # SELECT BENCHMARK COLUMN
+    # ==================================================
 
-    state_view = st.segmented_control(
-        "State",
-        options=[
-            "Current",
-            "Future",
-            "Current vs Future"
-        ],
-        default="Current vs Future",
-        key=f"state_{dimension}"
+    (
+        benchmark_current_column,
+        benchmark_future_column
+    ) = get_benchmark_columns(
+        benchmark_metric
     )
 
+    if state_view == "Current":
 
-    # --------------------------------------------------
-    # Prepare chart data
-    # --------------------------------------------------
+        state_column = "Current"
+        benchmark_column = benchmark_current_column
+        state_color = NAVY
+
+    else:
+
+        state_column = "Future"
+        benchmark_column = benchmark_future_column
+        state_color = LIGHT_BLUE
+
+
+    # ==================================================
+    # PREPARE QUESTION SCORES
+    # ==================================================
+
     question_scores = (
         state_score_by_question(
             dimension_df
         )
     )
 
-    question_scores["question_label"] = (
-        question_scores["question"]
-        .apply(wrap_question)
+    question_scores = (
+        question_scores
+        .merge(
+            benchmark_df[
+                [
+                    "question_id",
+                    benchmark_column
+                ]
+            ],
+            on="question_id",
+            how="left"
+        )
     )
+
+    question_scores = (
+        question_scores
+        .rename(
+            columns={
+                benchmark_column:
+                    "Industry Benchmark"
+            }
+        )
+    )
+
+    question_scores = (
+        question_scores
+        .sort_values("question_order")
+        .reset_index(drop=True)
+    )
+
+    question_scores["question_label"] = (
+        question_scores["question_id"]
+        .map(QUESTION_LABELS)
+        .fillna(question_scores["question_id"])
+    )
+
+
+    # ==================================================
+    # PREPARE ORGANIZATION SCORES
+    # ==================================================
 
     organization_scores = (
         state_score_by_organization(
@@ -329,341 +449,583 @@ def render_dimension_page(
         )
     )
 
+    organization_data = pd.DataFrame()
 
-    # ==================================================
-    # STATE SCORE BY QUESTION
-    # ==================================================
-    st.subheader(
-        "State Score by Question"
-    )
+    if not organization_scores.empty:
 
+        if state_view == "Current":
 
-    # --------------------------------------------------
-    # Current State
-    # --------------------------------------------------
-    if state_view == "Current":
+            organization_data = (
+                organization_scores[
+                    [
+                        "company_name",
+                        "Current"
+                    ]
+                ]
+                .copy()
+                .rename(
+                    columns={
+                        "Current": "Score"
+                    }
+                )
+            )
 
-        chart_data = question_scores[
-            [
-                "question",
-                "question_label",
-                "question_order",
-                "Current"
-            ]
-        ].copy()
+        else:
 
-        chart_data = chart_data.rename(
-            columns={
-                "Current": "Score"
-            }
-        )
+            organization_data = (
+                organization_scores[
+                    [
+                        "company_name",
+                        "Future"
+                    ]
+                ]
+                .copy()
+                .rename(
+                    columns={
+                        "Future": "Score"
+                    }
+                )
+            )
 
-        fig_question = px.bar(
-            chart_data,
-            x="question_label",
-            y="Score",
-            text_auto=".1f",
-            custom_data=[
-                "question"
-            ]
-        )
-
-        fig_question.update_traces(
-            hovertemplate=(
-                "<b>%{customdata[0]}</b>"
-                "<br><br>"
-                "Current State Score: %{y:.2f}"
-                "<extra></extra>"
+        organization_data = (
+            organization_data
+            .dropna(
+                subset=["Score"]
+            )
+            .sort_values(
+                "Score",
+                ascending=True
             )
         )
-
-
-    # --------------------------------------------------
-    # Future State
-    # --------------------------------------------------
-    elif state_view == "Future":
-
-        chart_data = question_scores[
-            [
-                "question",
-                "question_label",
-                "question_order",
-                "Future"
-            ]
-        ].copy()
-
-        chart_data = chart_data.rename(
-            columns={
-                "Future": "Score"
-            }
-        )
-
-        fig_question = px.bar(
-            chart_data,
-            x="question_label",
-            y="Score",
-            text_auto=".1f",
-            custom_data=[
-                "question"
-            ]
-        )
-
-        fig_question.update_traces(
-            hovertemplate=(
-                "<b>%{customdata[0]}</b>"
-                "<br><br>"
-                "Future State Score: %{y:.2f}"
-                "<extra></extra>"
-            )
-        )
-
-
-    # --------------------------------------------------
-    # Current vs Future
-    # --------------------------------------------------
-    else:
-
-        chart_data = question_scores.melt(
-            id_vars=[
-                "question",
-                "question_label",
-                "question_order"
-            ],
-            value_vars=[
-                "Current",
-                "Future"
-            ],
-            var_name="State",
-            value_name="Score"
-        )
-
-        fig_question = px.bar(
-            chart_data,
-            x="question_label",
-            y="Score",
-            color="State",
-            barmode="group",
-            text_auto=".1f",
-            custom_data=[
-                "question",
-                "State"
-            ]
-        )
-
-        fig_question.update_traces(
-            hovertemplate=(
-                "<b>%{customdata[0]}</b>"
-                "<br><br>"
-                "State: %{customdata[1]}"
-                "<br>"
-                "Score: %{y:.2f}"
-                "<extra></extra>"
-            )
-        )
-
-
-    # --------------------------------------------------
-    # Question chart formatting
-    # --------------------------------------------------
-    fig_question.update_layout(
-        xaxis_title=None,
-        yaxis_title="State Score",
-        yaxis=dict(
-            range=[0, 5.5],
-            dtick=1
-        ),
-        legend_title_text=None,
-        height=520,
-        margin=dict(
-            l=20,
-            r=20,
-            t=20,
-            b=130
-        )
-    )
-
-    fig_question.update_xaxes(
-        tickangle=0,
-        automargin=True,
-        tickfont=dict(
-            size=10
-        )
-    )
-
-    fig_question.update_traces(
-        textposition="outside",
-        cliponaxis=False
-    )
-
-    st.plotly_chart(
-        fig_question,
-        use_container_width=True
-    )
-
-
-    # Add some spacing between charts
-    st.write("")
 
 
     # ==================================================
-    # STATE SCORE BY ORGANIZATION
+    # SIDE-BY-SIDE ANALYSIS
     # ==================================================
-    st.subheader(
-        "State Score by Organization"
+
+    question_col, organization_col = st.columns(
+        2,
+        gap="medium"
     )
 
 
-    # --------------------------------------------------
-    # Current State
-    # --------------------------------------------------
-    if state_view == "Current":
+    # ==================================================
+    # LEFT: STATE SCORE BY QUESTION
+    # ==================================================
 
-        org_data = organization_scores[
-            [
-                "company_name",
-                "Current"
-            ]
-        ].copy()
+    with question_col:
 
-        org_data = org_data.rename(
-            columns={
-                "Current": "Score"
-            }
-        )
+        with st.container(border=True):
 
-        fig_org = px.bar(
-            org_data,
-            x="Score",
-            y="company_name",
-            orientation="h",
-            text_auto=".1f"
-        )
-
-        fig_org.update_traces(
-            hovertemplate=(
-                "<b>%{y}</b>"
-                "<br>"
-                "Current State Score: %{x:.2f}"
-                "<extra></extra>"
+            st.subheader(
+                "State Score by Question"
             )
-        )
 
-
-    # --------------------------------------------------
-    # Future State
-    # --------------------------------------------------
-    elif state_view == "Future":
-
-        org_data = organization_scores[
-            [
-                "company_name",
-                "Future"
-            ]
-        ].copy()
-
-        org_data = org_data.rename(
-            columns={
-                "Future": "Score"
-            }
-        )
-
-        fig_org = px.bar(
-            org_data,
-            x="Score",
-            y="company_name",
-            orientation="h",
-            text_auto=".1f"
-        )
-
-        fig_org.update_traces(
-            hovertemplate=(
-                "<b>%{y}</b>"
-                "<br>"
-                "Future State Score: %{x:.2f}"
-                "<extra></extra>"
+            number_of_questions = len(
+                question_scores
             )
-        )
 
 
-    # --------------------------------------------------
-    # Current vs Future
-    # --------------------------------------------------
-    else:
+            # ==================================================
+            # 3+ QUESTIONS → RADAR CHART
+            # ==================================================
 
-        org_data = organization_scores.melt(
-            id_vars="company_name",
-            value_vars=[
-                "Current",
-                "Future"
-            ],
-            var_name="State",
-            value_name="Score"
-        )
+            if number_of_questions >= 3:
 
-        fig_org = px.bar(
-            org_data,
-            x="Score",
-            y="company_name",
-            color="State",
-            orientation="h",
-            barmode="group",
-            text_auto=".1f",
-            custom_data=[
-                "State"
-            ]
-        )
+                question_labels = (
+                    question_scores[
+                        "question_label"
+                    ]
+                    .astype(str)
+                    .tolist()
+                )
 
-        fig_org.update_traces(
-            hovertemplate=(
-                "<b>%{y}</b>"
-                "<br>"
-                "State: %{customdata[0]}"
-                "<br>"
-                "Score: %{x:.2f}"
-                "<extra></extra>"
+                full_questions = (
+                    question_scores[
+                        "question"
+                    ]
+                    .astype(str)
+                    .tolist()
+                )
+
+                state_values = (
+                    pd.to_numeric(
+                        question_scores[
+                            state_column
+                        ],
+                        errors="coerce"
+                    )
+                    .tolist()
+                )
+
+                benchmark_values = (
+                    pd.to_numeric(
+                        question_scores[
+                            "Industry Benchmark"
+                        ],
+                        errors="coerce"
+                    )
+                    .tolist()
+                )
+
+
+                # Close radar polygon
+                radar_labels = (
+                    question_labels
+                    + [question_labels[0]]
+                )
+
+                radar_questions = (
+                    full_questions
+                    + [full_questions[0]]
+                )
+
+                radar_state_values = (
+                    state_values
+                    + [state_values[0]]
+                )
+
+                radar_benchmark_values = (
+                    benchmark_values
+                    + [benchmark_values[0]]
+                )
+
+
+                fig_question = go.Figure()
+
+
+                # ------------------------------------------
+                # STATE SCORE
+                # ------------------------------------------
+
+                fig_question.add_trace(
+
+                    go.Scatterpolar(
+
+                        r=radar_state_values,
+
+                        theta=radar_labels,
+
+                        mode="lines+markers",
+
+                        name=f"{state_view} State Score",
+
+                        line=dict(
+                            color=state_color,
+                            width=3
+                        ),
+
+                        marker=dict(
+                            color=state_color,
+                            size=8
+                        ),
+
+                        fill="toself",
+
+                        fillcolor=(
+                            "rgba(23, 63, 107, 0.08)"
+                            if state_view == "Current"
+                            else
+                            "rgba(105, 179, 243, 0.10)"
+                        ),
+
+                        customdata=radar_questions,
+
+                        hovertemplate=(
+                            "<b>%{customdata}</b><br>"
+                            f"{state_view} State Score: "
+                            "%{r:.2f}"
+                            "<extra></extra>"
+                        )
+                    )
+                )
+
+
+                # ------------------------------------------
+                # INDUSTRY BENCHMARK
+                # ------------------------------------------
+
+                fig_question.add_trace(
+
+                    go.Scatterpolar(
+
+                        r=radar_benchmark_values,
+
+                        theta=radar_labels,
+
+                        mode="lines+markers",
+
+                        name="Industry Benchmark",
+
+                        line=dict(
+                            color=GOLD,
+                            width=3
+                        ),
+
+                        marker=dict(
+                            color=GOLD,
+                            size=8
+                        ),
+
+                        customdata=radar_questions,
+
+                        hovertemplate=(
+                            "<b>%{customdata}</b><br>"
+                            f"{benchmark_metric} "
+                            "Industry Benchmark: "
+                            "%{r:.2f}"
+                            "<extra></extra>"
+                        )
+                    )
+                )
+
+
+                fig_question.update_layout(
+
+                    paper_bgcolor=(
+                        "rgba(0,0,0,0)"
+                    ),
+
+                    plot_bgcolor=(
+                        "rgba(0,0,0,0)"
+                    ),
+
+                    font=dict(
+                        color=TEXT
+                    ),
+
+                    polar=dict(
+
+                        bgcolor=(
+                            "rgba(0,0,0,0)"
+                        ),
+
+                        radialaxis=dict(
+
+                            visible=True,
+
+                            range=[0, 5],
+
+                            tickvals=[
+                                1,
+                                2,
+                                3,
+                                4,
+                                5
+                            ],
+
+                            gridcolor=GRID,
+
+                            linecolor=GRID
+                        ),
+
+                        angularaxis=dict(
+
+                            gridcolor=GRID,
+
+                            linecolor=GRID,
+
+                            tickfont=dict(
+                                size=11,
+                                color=TEXT
+                            )
+                        )
+                    ),
+
+                    legend=dict(
+
+                        orientation="h",
+
+                        yanchor="bottom",
+
+                        y=1.05,
+
+                        xanchor="center",
+
+                        x=0.5
+                    ),
+
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        font_color=TEXT
+                    ),
+
+                    height=520,
+
+                    margin=dict(
+                        l=70,
+                        r=70,
+                        t=80,
+                        b=60
+                    )
+                )
+
+
+                st.plotly_chart(
+                    fig_question,
+                    use_container_width=True
+                )
+
+
+            # ==================================================
+            # 1–2 QUESTIONS → GROUPED BAR CHART
+            # ==================================================
+
+            else:
+
+                question_chart_data = (
+                    question_scores[
+                        [
+                            "question",
+                            "question_label",
+                            "question_order",
+                            state_column,
+                            "Industry Benchmark"
+                        ]
+                    ]
+                    .copy()
+                )
+
+                question_chart_data = (
+                    question_chart_data
+                    .rename(
+                        columns={
+                            state_column:
+                                f"{state_view} State Score"
+                        }
+                    )
+                )
+
+                question_chart_data = (
+                    question_chart_data
+                    .melt(
+                        id_vars=[
+                            "question",
+                            "question_label",
+                            "question_order"
+                        ],
+                        value_vars=[
+                            f"{state_view} State Score",
+                            "Industry Benchmark"
+                        ],
+                        var_name="Series",
+                        value_name="Score"
+                    )
+                )
+
+
+                fig_question = px.bar(
+
+                    question_chart_data,
+
+                    x="question_label",
+
+                    y="Score",
+
+                    color="Series",
+
+                    barmode="group",
+
+                    text_auto=".1f",
+
+                    custom_data=[
+                        "question",
+                        "Series"
+                    ],
+
+                    color_discrete_map={
+
+                        f"{state_view} State Score":
+                            state_color,
+
+                        "Industry Benchmark":
+                            GOLD
+                    }
+                )
+
+
+                fig_question.update_traces(
+
+                    textposition="outside",
+
+                    cliponaxis=False,
+
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b>"
+                        "<br><br>"
+                        "%{customdata[1]}: "
+                        "%{y:.2f}"
+                        "<extra></extra>"
+                    )
+                )
+
+
+                fig_question.update_layout(
+
+                    paper_bgcolor=(
+                        "rgba(0,0,0,0)"
+                    ),
+
+                    plot_bgcolor=(
+                        "rgba(0,0,0,0)"
+                    ),
+
+                    font=dict(
+                        color=TEXT
+                    ),
+
+                    xaxis_title=None,
+
+                    yaxis_title="State Score",
+
+                    yaxis=dict(
+                        range=[0, 5.5],
+                        dtick=1,
+                        gridcolor=GRID
+                    ),
+
+                    xaxis=dict(
+                        gridcolor=GRID
+                    ),
+
+                    legend_title_text=None,
+
+                    legend=dict(
+
+                        orientation="h",
+
+                        yanchor="bottom",
+
+                        y=1.05,
+
+                        xanchor="center",
+
+                        x=0.5
+                    ),
+
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        font_color=TEXT
+                    ),
+
+                    height=520,
+
+                    margin=dict(
+                        l=40,
+                        r=30,
+                        t=80,
+                        b=80
+                    )
+                )
+
+
+                st.plotly_chart(
+                    fig_question,
+                    use_container_width=True
+                )
+
+
+    # ==================================================
+    # RIGHT: STATE SCORE BY ORGANIZATION
+    # ==================================================
+
+    with organization_col:
+
+        with st.container(border=True):
+
+            st.subheader(
+                "State Score by Organization"
             )
-        )
+
+            if not organization_data.empty:
+
+                fig_organization = px.bar(
+
+                    organization_data,
+
+                    x="Score",
+
+                    y="company_name",
+
+                    orientation="h",
+
+                    text_auto=".2f",
+
+                    color_discrete_sequence=[
+                        state_color
+                    ]
+                )
 
 
-    # --------------------------------------------------
-    # Dynamic organization chart height
-    # --------------------------------------------------
-    number_of_organizations = len(
-        organization_scores
-    )
+                fig_organization.update_layout(
 
-    organization_chart_height = max(
-        350,
-        number_of_organizations * 45 + 150
-    )
+                    paper_bgcolor=(
+                        "rgba(0,0,0,0)"
+                    ),
+
+                    plot_bgcolor=(
+                        "rgba(0,0,0,0)"
+                    ),
+
+                    font=dict(
+                        color=TEXT
+                    ),
+
+                    xaxis_title="State Score",
+
+                    yaxis_title=None,
+
+                    xaxis=dict(
+                        range=[0, 5.5],
+                        dtick=1,
+                        gridcolor=GRID
+                    ),
+
+                    yaxis=dict(
+                        gridcolor=GRID
+                    ),
+
+                    # Match question chart height
+                    height=520,
+
+                    margin=dict(
+                        l=20,
+                        r=50,
+                        t=80,
+                        b=60
+                    ),
+
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        font_color=TEXT
+                    ),
+
+                    showlegend=False
+                )
 
 
-    # --------------------------------------------------
-    # Organization chart formatting
-    # --------------------------------------------------
-    fig_org.update_layout(
-        xaxis_title="State Score",
-        yaxis_title=None,
-        xaxis=dict(
-            range=[0, 5.5],
-            dtick=1
-        ),
-        legend_title_text=None,
-        height=organization_chart_height,
-        margin=dict(
-            l=20,
-            r=40,
-            t=20,
-            b=40
-        )
-    )
+                fig_organization.update_traces(
 
-    fig_org.update_traces(
-        textposition="outside",
-        cliponaxis=False
-    )
+                    textposition="outside",
 
-    st.plotly_chart(
-        fig_org,
-        use_container_width=True
-    )
+                    cliponaxis=False,
+
+                    hovertemplate=(
+                        "<b>%{y}</b><br>"
+                        f"{state_view} State Score: "
+                        "%{x:.2f}"
+                        "<extra></extra>"
+                    )
+                )
+
+
+                st.plotly_chart(
+                    fig_organization,
+                    use_container_width=True
+                )
+
+            else:
+
+                st.info(
+                    "No organization data available."
+                )
