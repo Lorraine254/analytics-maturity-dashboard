@@ -330,15 +330,14 @@ with st.sidebar:
     st.markdown("""
     **Maturity Scale**
 
-    - **1 — Limited**
-    - **2 — Evolving**
-    - **3 — Acceptable**
-    - **4 — Advanced**
-    - **5 — Optimizing**
+    **1: Limited**
 
-    - Higher scores indicate greater analytics maturity.
+    **2: Evolving**
 
-    - **Current State** reflects the organization's present analytics maturity, while **Future State** reflects its desired maturity.
+    **3: Acceptable**
 
-    - **Industry Benchmark** compares the assessment against benchmark companies in the **Banking and Capital Markets sector**. 
+    **4: Advanced**
+
+    **5: Optimizing**
+
     """)
