@@ -1,15 +1,13 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+
 from supabase import create_client
 
 from calculations import (
     weighted_maturity_score,
     state_score_by_dimension,
-    state_score_by_organization,
-    maturity_gap_by_organization,
-    benchmark_score_by_dimension
+    industry_peer_benchmark_by_dimension
 )
 
 
@@ -23,11 +21,6 @@ GOLD = "#D9B300"
 GRID = "rgba(23, 63, 107, 0.15)"
 TEXT = "#17375E"
 
-STATE_COLORS = {
-    "Current": NAVY,
-    "Future": LIGHT_BLUE
-}
-
 
 # ==================================================
 # SUPABASE CONNECTION
@@ -35,6 +28,7 @@ STATE_COLORS = {
 
 @st.cache_resource
 def init_supabase():
+
     return create_client(
         st.secrets["SUPABASE_URL"],
         st.secrets["SUPABASE_KEY"]
@@ -62,58 +56,12 @@ def load_data():
 
 
 # ==================================================
-# LOAD BENCHMARK DATA
-# ==================================================
-
-@st.cache_data(ttl=5)
-def load_benchmark_data():
-
-    response = (
-        supabase
-        .table("benchmark_reference")
-        .select("*")
-        .execute()
-    )
-
-    return pd.DataFrame(response.data)
-
-
-# ==================================================
-# SHARED CHART STYLING
-# ==================================================
-
-def style_chart(fig):
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(
-            color=TEXT
-        ),
-        legend_title_text=None,
-        hoverlabel=dict(
-            bgcolor="white",
-            font_color=TEXT
-        )
-    )
-
-    fig.update_xaxes(
-        gridcolor=GRID,
-        zeroline=False
-    )
-
-    fig.update_yaxes(
-        gridcolor=GRID,
-        zeroline=False
-    )
-
-    return fig
-
-
-# ==================================================
 # DASHBOARD
 # ==================================================
+
 st.title("Overview")
+
+
 try:
 
     # ==================================================
@@ -121,13 +69,56 @@ try:
     # ==================================================
 
     df = load_data()
-    benchmark_df = load_benchmark_data()
-
 
     if df.empty:
 
         st.info(
             "No assessment responses are available yet."
+        )
+
+        st.stop()
+
+
+    # ==================================================
+    # SELECTED ORGANIZATION
+    # ==================================================
+
+    # Keep the complete dataset for industry peer
+    # benchmarking.
+    all_df = df.copy()
+
+    selected_response_id = st.session_state.get(
+        "selected_response_id"
+    )
+
+    selected_company = st.session_state.get(
+        "selected_company"
+    )
+
+    selected_industry = st.session_state.get(
+        "selected_industry"
+    )
+
+    if selected_response_id is None:
+
+        st.info(
+            "Select an organization to view its assessment."
+        )
+
+        st.stop()
+
+
+    # Filter dashboard data to the organization selected
+    # through the private results link in app.py.
+    df = df[
+        df["response_id"] == selected_response_id
+    ].copy()
+
+    if df.empty:
+
+        st.warning(
+            "No assessment data are available "
+            "for the selected organization."
         )
 
         st.stop()
@@ -147,39 +138,15 @@ try:
         errors="coerce"
     )
 
-
-    question_map_df = (
-        df[
-            ["question_id", "dimension"]
-        ]
-        .dropna()
-        .drop_duplicates()
-        .copy()
+    all_df["score"] = pd.to_numeric(
+        all_df["score"],
+        errors="coerce"
     )
 
-
-    # ==================================================
-    # PREPARE BENCHMARK DATA
-    # ==================================================
-
-    benchmark_columns = [
-        "average_current",
-        "average_future",
-        "lower_quartile_current",
-        "lower_quartile_future",
-        "median_current",
-        "median_future",
-        "top_quartile_current",
-        "top_quartile_future"
-    ]
-
-
-    for column in benchmark_columns:
-
-        benchmark_df[column] = pd.to_numeric(
-            benchmark_df[column],
-            errors="coerce"
-        )
+    all_df["weight"] = pd.to_numeric(
+        all_df["weight"],
+        errors="coerce"
+    )
 
 
     # ==================================================
@@ -194,7 +161,6 @@ try:
         df["state"] == "Future"
     ].copy()
 
-
     current_score = weighted_maturity_score(
         current_df
     )
@@ -207,10 +173,69 @@ try:
         future_score - current_score
     )
 
-    organizations_surveyed = (
-        df["company_name"]
-        .dropna()
-        .nunique()
+
+    # ==================================================
+    # OVERVIEW KPI STYLING
+    # ==================================================
+
+    st.markdown(
+        """
+        <style>
+
+        /* ---------------------------------------------
+           Keep all four KPI cards the same height
+           --------------------------------------------- */
+
+        div[data-testid="stHorizontalBlock"]
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(
+            div[data-testid="stMetric"]
+        ) {
+            min-height: 128px !important;
+            height: 128px !important;
+        }
+
+
+        /* ---------------------------------------------
+           Keep all KPI values visually consistent
+           --------------------------------------------- */
+
+        div[data-testid="stHorizontalBlock"]
+        div[data-testid="stMetricValue"] {
+            font-size: 26px !important;
+            line-height: 1.2 !important;
+            color: #17375E !important;
+            font-weight: 600 !important;
+        }
+
+
+        /* ---------------------------------------------
+           Allow KPI values to wrap rather than truncate
+           --------------------------------------------- */
+
+        div[data-testid="stHorizontalBlock"]
+        div[data-testid="stMetricValue"] > div {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+            line-height: 1.2 !important;
+        }
+
+
+        /* ---------------------------------------------
+           Organization card specifically
+           --------------------------------------------- */
+
+        div[data-testid="stHorizontalBlock"]
+        > div:nth-child(4)
+        div[data-testid="stMetricValue"] {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+        }
+
+        </style>
+        """,
+        unsafe_allow_html=True
     )
 
 
@@ -218,9 +243,9 @@ try:
     # OVERVIEW KPIs
     # ==================================================
 
-
-
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(
+        [1, 1, 1, 1]
+    )
 
 
     with col1:
@@ -258,8 +283,8 @@ try:
         with st.container(border=True):
 
             st.metric(
-                "Organizations Surveyed",
-                organizations_surveyed
+                "Organization",
+                selected_company
             )
 
 
@@ -268,7 +293,6 @@ try:
     # ==================================================
 
     st.write("")
-
 
     benchmark_metric = st.segmented_control(
         "Industry Benchmark",
@@ -284,30 +308,102 @@ try:
 
 
     # ==================================================
-    # BENCHMARK SCORES
+    # DYNAMIC INDUSTRY PEER BENCHMARK
     # ==================================================
 
-    benchmark_scores = benchmark_score_by_dimension(
-        benchmark_data=benchmark_df,
-        question_map=question_map_df,
-        metric=benchmark_metric
+    benchmark_scores, peer_count, benchmark_available = (
+        industry_peer_benchmark_by_dimension(
+            all_data=all_df,
+            selected_response_id=selected_response_id,
+            selected_industry=selected_industry,
+            metric=benchmark_metric,
+            min_peers=2
+        )
     )
 
 
     # ==================================================
-    # DIMENSION SCORES
+    # BENCHMARK STATUS
+    # ==================================================
+
+    if benchmark_available:
+
+        st.caption(
+            f"{benchmark_metric} benchmark based on "
+            f"{peer_count} other participating organizations "
+            f"in {selected_industry}."
+        )
+
+    else:
+
+        if (
+            selected_industry is None
+            or pd.isna(selected_industry)
+            or not str(selected_industry).strip()
+        ):
+
+            st.info(
+                "Industry benchmark unavailable because "
+                "the selected organization does not have "
+                "an industry classification."
+            )
+
+        else:
+
+            st.info(
+                f"Industry benchmark unavailable. "
+                f"At least 2 other participating organizations "
+                f"in {selected_industry} are required to provide "
+                f"an anonymized industry comparison. "
+                f"Currently available peers: {peer_count}."
+            )
+
+
+    # ==================================================
+    # SELECTED ORGANIZATION DIMENSION SCORES
     # ==================================================
 
     dimension_scores = state_score_by_dimension(
         df
     )
 
+    if dimension_scores.empty:
 
-    dimension_comparison = dimension_scores.merge(
-        benchmark_scores,
-        on="dimension",
-        how="left"
-    )
+        st.warning(
+            "Dimension scores could not be calculated "
+            "for the selected organization."
+        )
+
+        st.stop()
+
+
+    # ==================================================
+    # ADD BENCHMARK SCORES WHEN AVAILABLE
+    # ==================================================
+
+    if benchmark_available:
+
+        dimension_comparison = (
+            dimension_scores.merge(
+                benchmark_scores,
+                on="dimension",
+                how="left"
+            )
+        )
+
+    else:
+
+        dimension_comparison = (
+            dimension_scores.copy()
+        )
+
+        dimension_comparison[
+            "benchmark_current"
+        ] = pd.NA
+
+        dimension_comparison[
+            "benchmark_future"
+        ] = pd.NA
 
 
     # ==================================================
@@ -320,8 +416,6 @@ try:
         .tolist()
     )
 
-
-    # Wrap only the longer labels
     dimension_labels = {
 
         "Business Decisions & Analytics":
@@ -340,7 +434,6 @@ try:
             "Organization<br>& Governance"
     }
 
-
     radar_dimensions = [
         dimension_labels.get(
             dimension,
@@ -349,8 +442,6 @@ try:
         for dimension in dimensions
     ]
 
-
-    # Close radar polygon
     radar_dimensions_closed = (
         radar_dimensions
         + [radar_dimensions[0]]
@@ -367,22 +458,26 @@ try:
         .tolist()
     )
 
-    current_benchmark = (
-        dimension_comparison["benchmark_current"]
-        .astype(float)
-        .tolist()
-    )
-
-
     current_scores_closed = (
         current_scores
         + [current_scores[0]]
     )
 
-    current_benchmark_closed = (
-        current_benchmark
-        + [current_benchmark[0]]
-    )
+
+    if benchmark_available:
+
+        current_benchmark = (
+            dimension_comparison[
+                "benchmark_current"
+            ]
+            .astype(float)
+            .tolist()
+        )
+
+        current_benchmark_closed = (
+            current_benchmark
+            + [current_benchmark[0]]
+        )
 
 
     # ==================================================
@@ -395,22 +490,26 @@ try:
         .tolist()
     )
 
-    future_benchmark = (
-        dimension_comparison["benchmark_future"]
-        .astype(float)
-        .tolist()
-    )
-
-
     future_scores_closed = (
         future_scores
         + [future_scores[0]]
     )
 
-    future_benchmark_closed = (
-        future_benchmark
-        + [future_benchmark[0]]
-    )
+
+    if benchmark_available:
+
+        future_benchmark = (
+            dimension_comparison[
+                "benchmark_future"
+            ]
+            .astype(float)
+            .tolist()
+        )
+
+        future_benchmark_closed = (
+            future_benchmark
+            + [future_benchmark[0]]
+        )
 
 
     # ==================================================
@@ -430,7 +529,7 @@ try:
 
 
         # --------------------------------------------------
-        # Current State Score
+        # Selected organization
         # --------------------------------------------------
 
         fig_current_dimension.add_trace(
@@ -443,7 +542,7 @@ try:
 
                 mode="lines+markers",
 
-                name="Current State Score",
+                name=selected_company,
 
                 line=dict(
                     color=NAVY,
@@ -468,52 +567,55 @@ try:
 
                 hovertemplate=(
                     "<b>%{customdata}</b><br>"
-                    "Current State Score: %{r:.2f}"
-                    "<extra></extra>"
-                )
-            )
-        )
-
-
-        # --------------------------------------------------
-        # Industry Benchmark
-        # --------------------------------------------------
-
-        fig_current_dimension.add_trace(
-
-            go.Scatterpolar(
-
-                r=current_benchmark_closed,
-
-                theta=radar_dimensions_closed,
-
-                mode="lines+markers",
-
-                name="Industry Benchmark",
-
-                line=dict(
-                    color=GOLD,
-                    width=3
-                ),
-
-                marker=dict(
-                    size=8,
-                    color=GOLD
-                ),
-
-                customdata=(
-                    dimensions
-                    + [dimensions[0]]
-                ),
-
-                hovertemplate=(
-                    "<b>%{customdata}</b><br>"
-                    f"{benchmark_metric} Industry Benchmark: "
+                    f"{selected_company}: "
                     "%{r:.2f}"
                     "<extra></extra>"
                 )
             )
         )
+
+
+        # --------------------------------------------------
+        # Industry peer benchmark
+        # --------------------------------------------------
+
+        if benchmark_available:
+
+            fig_current_dimension.add_trace(
+
+                go.Scatterpolar(
+
+                    r=current_benchmark_closed,
+
+                    theta=radar_dimensions_closed,
+
+                    mode="lines+markers",
+
+                    name="Industry Peer Benchmark",
+
+                    line=dict(
+                        color=GOLD,
+                        width=3
+                    ),
+
+                    marker=dict(
+                        size=8,
+                        color=GOLD
+                    ),
+
+                    customdata=(
+                        dimensions
+                        + [dimensions[0]]
+                    ),
+
+                    hovertemplate=(
+                        "<b>%{customdata}</b><br>"
+                        f"{benchmark_metric} Industry "
+                        "Peer Benchmark: %{r:.2f}"
+                        "<extra></extra>"
+                    )
+                )
+            )
 
 
         # --------------------------------------------------
@@ -617,7 +719,7 @@ try:
 
 
         # --------------------------------------------------
-        # Future State Score
+        # Selected organization
         # --------------------------------------------------
 
         fig_future_dimension.add_trace(
@@ -630,7 +732,7 @@ try:
 
                 mode="lines+markers",
 
-                name="Future State Score",
+                name=selected_company,
 
                 line=dict(
                     color=LIGHT_BLUE,
@@ -655,52 +757,55 @@ try:
 
                 hovertemplate=(
                     "<b>%{customdata}</b><br>"
-                    "Future State Score: %{r:.2f}"
-                    "<extra></extra>"
-                )
-            )
-        )
-
-
-        # --------------------------------------------------
-        # Industry Benchmark
-        # --------------------------------------------------
-
-        fig_future_dimension.add_trace(
-
-            go.Scatterpolar(
-
-                r=future_benchmark_closed,
-
-                theta=radar_dimensions_closed,
-
-                mode="lines+markers",
-
-                name="Industry Benchmark",
-
-                line=dict(
-                    color=GOLD,
-                    width=3
-                ),
-
-                marker=dict(
-                    size=8,
-                    color=GOLD
-                ),
-
-                customdata=(
-                    dimensions
-                    + [dimensions[0]]
-                ),
-
-                hovertemplate=(
-                    "<b>%{customdata}</b><br>"
-                    f"{benchmark_metric} Industry Benchmark: "
+                    f"{selected_company}: "
                     "%{r:.2f}"
                     "<extra></extra>"
                 )
             )
         )
+
+
+        # --------------------------------------------------
+        # Industry peer benchmark
+        # --------------------------------------------------
+
+        if benchmark_available:
+
+            fig_future_dimension.add_trace(
+
+                go.Scatterpolar(
+
+                    r=future_benchmark_closed,
+
+                    theta=radar_dimensions_closed,
+
+                    mode="lines+markers",
+
+                    name="Industry Peer Benchmark",
+
+                    line=dict(
+                        color=GOLD,
+                        width=3
+                    ),
+
+                    marker=dict(
+                        size=8,
+                        color=GOLD
+                    ),
+
+                    customdata=(
+                        dimensions
+                        + [dimensions[0]]
+                    ),
+
+                    hovertemplate=(
+                        "<b>%{customdata}</b><br>"
+                        f"{benchmark_metric} Industry "
+                        "Peer Benchmark: %{r:.2f}"
+                        "<extra></extra>"
+                    )
+                )
+            )
 
 
         # --------------------------------------------------
@@ -790,199 +895,6 @@ try:
 
             st.plotly_chart(
                 fig_future_dimension,
-                use_container_width=True
-            )
-
-
-    # ==================================================
-    # ORGANIZATION ANALYSIS
-    # ==================================================
-
-    st.write("")
-
-
-    organization_scores = (
-        state_score_by_organization(df)
-    )
-
-
-    organization_gap = (
-        maturity_gap_by_organization(df)
-    )
-
-
-    organization_col1, organization_col2 = (
-        st.columns(2)
-    )
-
-
-    # ==================================================
-    # STATE SCORE BY ORGANIZATION
-    # ==================================================
-
-    with organization_col1:
-
-        org_chart_data = (
-            organization_scores
-            .melt(
-                id_vars="company_name",
-
-                value_vars=[
-                    "Current",
-                    "Future"
-                ],
-
-                var_name="State",
-
-                value_name="Score"
-            )
-        )
-
-
-        fig_organization = px.bar(
-
-            org_chart_data,
-
-            x="Score",
-
-            y="company_name",
-
-            color="State",
-
-            orientation="h",
-
-            barmode="group",
-
-            text_auto=".2f",
-
-            color_discrete_map=STATE_COLORS
-        )
-
-
-        number_of_organizations = len(
-            organization_scores
-        )
-
-
-        organization_chart_height = max(
-            350,
-            number_of_organizations * 45 + 150
-        )
-
-
-        fig_organization.update_layout(
-
-            xaxis_title="State Score",
-
-            yaxis_title=None,
-
-            xaxis=dict(
-                range=[0, 5.5],
-                dtick=1
-            ),
-
-            height=organization_chart_height,
-
-            margin=dict(
-                l=20,
-                r=40,
-                t=20,
-                b=40
-            )
-        )
-
-
-        fig_organization.update_traces(
-
-            textposition="outside",
-
-            cliponaxis=False
-        )
-
-
-        style_chart(
-            fig_organization
-        )
-
-
-        with st.container(border=True):
-
-            st.subheader(
-                "State Score by Organization"
-            )
-
-            st.plotly_chart(
-                fig_organization,
-                use_container_width=True
-            )
-
-
-    # ==================================================
-    # MATURITY GAP BY ORGANIZATION
-    # ==================================================
-
-    with organization_col2:
-
-        fig_organization_gap = px.bar(
-
-            organization_gap,
-
-            x="maturity_gap",
-
-            y="company_name",
-
-            orientation="h",
-
-            text_auto=".2f",
-
-            color_discrete_sequence=[
-                NAVY
-            ]
-        )
-
-
-        fig_organization_gap.update_layout(
-
-            xaxis_title="Maturity Gap",
-
-            yaxis_title=None,
-
-            xaxis=dict(
-                rangemode="tozero"
-            ),
-
-            height=organization_chart_height,
-
-            margin=dict(
-                l=20,
-                r=40,
-                t=20,
-                b=40
-            )
-        )
-
-
-        fig_organization_gap.update_traces(
-
-            textposition="outside",
-
-            cliponaxis=False
-        )
-
-
-        style_chart(
-            fig_organization_gap
-        )
-
-
-        with st.container(border=True):
-
-            st.subheader(
-                "Maturity Gap by Organization"
-            )
-
-            st.plotly_chart(
-                fig_organization_gap,
                 use_container_width=True
             )
 

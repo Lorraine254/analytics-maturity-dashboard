@@ -1,17 +1,26 @@
 import streamlit as st
 import base64
+import pandas as pd
+
 from pathlib import Path
 from streamlit_autorefresh import st_autorefresh
+from supabase import create_client
 
 
 # --------------------------------------------------
 # Page configuration
 # --------------------------------------------------
+
 st.set_page_config(
     page_title="Analytics Maturity Dashboard",
     page_icon="📊",
     layout="wide"
 )
+
+
+# --------------------------------------------------
+# Top navigation styling
+# --------------------------------------------------
 
 st.markdown("""
 <style>
@@ -56,9 +65,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 # --------------------------------------------------
 # Auto-refresh
 # --------------------------------------------------
+
 st_autorefresh(
     interval=5000,
     key="dashboard_refresh"
@@ -68,13 +79,16 @@ st_autorefresh(
 # --------------------------------------------------
 # Background image
 # --------------------------------------------------
+
 def get_base64_image(image_path):
+
     image_path = Path(image_path)
 
     if not image_path.exists():
         return None
 
     with open(image_path, "rb") as image_file:
+
         return base64.b64encode(
             image_file.read()
         ).decode()
@@ -88,6 +102,7 @@ background_image = get_base64_image(
 # --------------------------------------------------
 # Global dashboard styling
 # --------------------------------------------------
+
 if background_image:
 
     background_css = f"""
@@ -154,7 +169,8 @@ st.markdown(
 
 
     /* Navigation section headings */
-    [data-testid="stSidebar"] [data-testid="stNavSectionHeader"] {{
+    [data-testid="stSidebar"]
+    [data-testid="stNavSectionHeader"] {{
         color: #9CCDF5 !important;
         font-weight: 700;
     }}
@@ -164,20 +180,24 @@ st.markdown(
        Sidebar navigation links
        -------------------------------------------------- */
 
-    [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] {{
+    [data-testid="stSidebar"]
+    a[data-testid="stPageLink-NavLink"] {{
         border-radius: 8px;
         margin-bottom: 3px;
     }}
 
-    [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"]:hover {{
+    [data-testid="stSidebar"]
+    a[data-testid="stPageLink-NavLink"]:hover {{
         background-color: rgba(255, 255, 255, 0.10);
     }}
 
-    [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"][aria-current="page"] {{
+    [data-testid="stSidebar"]
+    a[data-testid="stPageLink-NavLink"][aria-current="page"] {{
         background-color: #69B3F3;
     }}
 
-    [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"][aria-current="page"] * {{
+    [data-testid="stSidebar"]
+    a[data-testid="stPageLink-NavLink"][aria-current="page"] * {{
         color: #17375E !important;
         font-weight: 600;
     }}
@@ -205,7 +225,6 @@ st.markdown(
 
     /* --------------------------------------------------
        KPI cards
-       We use bordered Streamlit containers for KPI cards.
        -------------------------------------------------- */
 
     div[data-testid="stVerticalBlockBorderWrapper"]:has(
@@ -273,9 +292,153 @@ st.markdown(
 
 
 # --------------------------------------------------
+# Supabase connection
+# --------------------------------------------------
+
+@st.cache_resource
+def init_supabase():
+
+    return create_client(
+        st.secrets["SUPABASE_URL"],
+        st.secrets["SUPABASE_KEY"]
+    )
+
+
+supabase = init_supabase()
+
+
+# --------------------------------------------------
+# Resolve organization from private access token
+# --------------------------------------------------
+
+@st.cache_data(ttl=5)
+def get_organization_from_token(access_token):
+
+    response = (
+        supabase
+        .rpc(
+            "get_assessment_by_token",
+            {
+                "p_access_token": access_token
+            }
+        )
+        .execute()
+    )
+
+    if not response.data:
+        return None
+
+    return response.data[0]
+
+
+# --------------------------------------------------
+# Read private access token
+# --------------------------------------------------
+
+# When the organization first enters through its
+# private link, the token is available in the URL.
+url_token = st.query_params.get("token")
+
+
+# Store the URL token in the current Streamlit session.
+# This allows the organization to move between pages
+# even when Streamlit removes the query parameter
+# from the visible URL.
+if url_token:
+
+    st.session_state["access_token"] = url_token
+
+
+# Use the token retained in the current session.
+access_token = st.session_state.get(
+    "access_token"
+)
+
+
+# If neither the URL nor the current session contains
+# a token, the dashboard must not display results.
+if not access_token:
+
+    st.error(
+        "This dashboard requires a valid private results link."
+    )
+
+    st.info(
+        "Please use the private results link provided "
+        "for your organization's assessment."
+    )
+
+    st.stop()
+
+
+# --------------------------------------------------
+# Validate private access token
+# --------------------------------------------------
+
+organization = get_organization_from_token(
+    access_token
+)
+
+
+if organization is None:
+
+    # Remove an invalid token from the session so it
+    # cannot continue being reused.
+    st.session_state.pop(
+        "access_token",
+        None
+    )
+
+    st.session_state.pop(
+        "selected_response_id",
+        None
+    )
+
+    st.session_state.pop(
+        "selected_company",
+        None
+    )
+
+    st.session_state.pop(
+        "selected_industry",
+        None
+    )
+
+    st.error(
+        "This results link is invalid or is no longer available."
+    )
+
+    st.info(
+        "Please check that you are using the complete "
+        "private results link."
+    )
+
+    st.stop()
+
+
+# --------------------------------------------------
+# Store organization information
+# --------------------------------------------------
+
+st.session_state["selected_response_id"] = (
+    organization["response_id"]
+)
+
+st.session_state["selected_company"] = (
+    organization["company_name"]
+)
+
+st.session_state["selected_industry"] = (
+    organization["industry"]
+)
+
+
+# --------------------------------------------------
 # Navigation
 # --------------------------------------------------
+
 pages = [
+
     st.Page(
         "overview.py",
         title="Overview",
@@ -308,12 +471,59 @@ pages = [
     )
 ]
 
+
 navigation = st.navigation(
     pages,
     position="top"
 )
 
+
+# --------------------------------------------------
+# Organization information
+# --------------------------------------------------
+
+with st.sidebar:
+
+    st.title(
+        "Analytics Maturity Dashboard"
+    )
+
+    selected_company = st.session_state.get(
+        "selected_company"
+    )
+
+    selected_industry = st.session_state.get(
+        "selected_industry"
+    )
+
+    st.caption(
+        f"Organization: **{selected_company}**"
+    )
+
+    if (
+        pd.notna(selected_industry)
+        and str(selected_industry).strip()
+    ):
+
+        st.caption(
+            f"Industry: **{selected_industry}**"
+        )
+
+    else:
+
+        st.caption(
+            "Industry: **Not specified**"
+        )
+
+    st.divider()
+
+
+# --------------------------------------------------
+# Run selected page
+# --------------------------------------------------
+
 navigation.run()
+
 
 # --------------------------------------------------
 # Score interpretation
@@ -321,24 +531,24 @@ navigation.run()
 
 with st.sidebar:
 
-    st.title("Analytics Maturity Dashboard")
-
-    st.divider()
-
-    st.subheader("How to interpret the scores")
+    st.subheader(
+        "How to interpret the scores"
+    )
 
     st.markdown("""
     **Maturity Scale**
 
-    - **1 — Limited**
-    - **2 — Evolving**
-    - **3 — Acceptable**
-    - **4 — Advanced**
-    - **5 — Optimizing**
+    **1 : Limited**
 
-    - Higher scores indicate greater analytics maturity.
+    **2 : Evolving**
 
-    - **Current State** reflects the organization's present analytics maturity, while **Future State** reflects its desired maturity.
+    **3 : Acceptable**
 
-    - **Industry Benchmark** compares the assessment against benchmark companies in the **Banking and Capital Markets sector**. 
+    **4 : Advanced**
+    
+    **5 : Optimizing**
+
+    - **Industry Benchmark** compares the organization
+      against other participating organizations within
+      the same industry.
     """)
